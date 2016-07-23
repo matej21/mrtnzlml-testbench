@@ -36,7 +36,27 @@ class DoctrineConnectionMock extends \Kdyby\Doctrine\Connection implements \Test
 				return;
 			}
 			try {
-				$this->__testbench_database_setup($connection, $container);
+				$dataFile = 'nette.safe://' . \Testbench\Bootstrap::$tempDir . '/../databases.testbench';
+				if (file_exists($dataFile)) {
+					$data = file_get_contents($dataFile);
+				} else {
+					$data = '';
+				}
+
+				$dbName = 'testbench_' . getenv(\Tester\Environment::THREAD);
+				$this->__testbench_databaseName = $dbName;
+
+				if (!preg_match('~' . $dbName . '~', $data)) {
+					$handle = fopen($dataFile, 'a+');
+					fwrite($handle, $dbName . "\n");
+					fclose($handle);
+
+					$this->__testbench_database_setup($connection, $container);
+				} else { //database already exists
+					$this->__testbench_switch_database($connection, $container);
+				}
+
+				$connection->beginTransaction();
 			} catch (\Exception $e) {
 				\Tester\Assert::fail($e->getMessage());
 			}
@@ -44,13 +64,53 @@ class DoctrineConnectionMock extends \Kdyby\Doctrine\Connection implements \Test
 		parent::__construct($params, $driver, $config, $eventManager);
 	}
 
-	/** @internal */
+	/**
+	 * @internal
+	 *
+	 * @param \Kdyby\Doctrine\Connection $connection
+	 */
+	public function __testbench_switch_database($connection, \Nette\DI\Container $container)
+	{
+		if ($connection->getDatabasePlatform() instanceof MySqlPlatform) {
+			try {
+				$connection->exec("USE {$this->__testbench_databaseName}");
+			} catch (\Doctrine\DBAL\Exception\DriverException $exc) {
+				if ($exc->getErrorCode() === 1049) { //ER_BAD_DB_ERROR
+					$this->__testbench_database_setup($connection, $container);
+				} else {
+					throw $exc;
+				}
+			}
+		} else {
+			try {
+				$this->__testbench_database_connect($connection, $container, $this->__testbench_databaseName);
+			} catch (\Doctrine\DBAL\Exception\DriverException $exc) {
+				if ($exc->getErrorCode() === 7) {
+					$this->__testbench_database_setup($connection, $container);
+				} else {
+					throw $exc;
+				}
+			}
+		}
+	}
+
+	/**
+	 * @internal
+	 *
+	 * @param DoctrineConnectionMock $connection
+	 */
 	public function __testbench_database_setup($connection, \Nette\DI\Container $container)
 	{
-		$this->__testbench_databaseName = 'db_tests_' . getmypid();
-
-		$this->__testbench_database_drop($connection, $container);
-		$this->__testbench_database_create($connection, $container);
+		try {
+			$this->__testbench_database_create($connection, $container);
+		} catch (\Doctrine\DBAL\Exception\DriverException $exc) {
+			if ($exc->getErrorCode() === 1007 || $exc->getErrorCode() === 7) { //ER_DB_CREATE_EXISTS (7 - pgsql)
+				$this->__testbench_database_drop($connection, $container);
+				$this->__testbench_database_create($connection, $container);
+			} else {
+				throw $exc;
+			}
+		}
 
 		$config = $container->parameters['testbench'];
 
@@ -70,10 +130,6 @@ class DoctrineConnectionMock extends \Kdyby\Doctrine\Connection implements \Test
 				$migration->migrate($migrationsConfig->getLatestVersion());
 			}
 		}
-
-		register_shutdown_function(function () use ($connection, $container) {
-			$this->__testbench_database_drop($connection, $container);
-		});
 	}
 
 	/**
@@ -83,12 +139,11 @@ class DoctrineConnectionMock extends \Kdyby\Doctrine\Connection implements \Test
 	 */
 	public function __testbench_database_create($connection, \Nette\DI\Container $container)
 	{
-		$connection->exec("CREATE DATABASE {$this->__testbench_databaseName}");
-		if ($connection->getDatabasePlatform() instanceof MySqlPlatform) {
-			$connection->exec("USE {$this->__testbench_databaseName}");
-		} else {
-			$this->__testbench_database_connect($connection, $container, $this->__testbench_databaseName);
+		if (!$connection->getDatabasePlatform() instanceof MySqlPlatform) {
+			$this->__testbench_database_connect($connection, $container);
 		}
+		$connection->exec("CREATE DATABASE {$this->__testbench_databaseName}");
+		$this->__testbench_switch_database($connection, $container);
 	}
 
 	/**

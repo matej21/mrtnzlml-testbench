@@ -15,9 +15,9 @@ class DoctrineComponentWithDatabaseAccess extends \Nette\Application\UI\Control
 		Assert::count(1, $connection->onConnect);
 		if ($connection->getDatabasePlatform() instanceof \Doctrine\DBAL\Platforms\MySqlPlatform) {
 			Assert::match('testbench_initial', $connection->getDatabase());
-			Assert::match('db_tests_' . getmypid(), $connection->query('SELECT DATABASE();')->fetchColumn());
+			Assert::truthy(preg_match('~testbench_[1-8]~', $connection->query('SELECT DATABASE();')->fetchColumn()));
 		} else {
-			Assert::same('db_tests_' . getmypid(), $connection->getDatabase());
+			Assert::truthy(preg_match('~testbench_[1-8]~', $connection->getDatabase()));
 		}
 	}
 

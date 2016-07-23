@@ -2,6 +2,10 @@
 
 Tested against PHP 5.6 and 7.0. Please read [this wiki](https://github.com/mrtnzlml/testbench/wiki).
 
+```
+mysql -uroot -proot -e 'show databases' | grep db_tests_* | xargs -I "@@" mysql -uroot -proot -e "DROP database \`@@\`"
+```
+
 Heavily inspired by these GitHub projects:
 - [Kdyby](https://github.com/Kdyby/TesterExtras), [Librette](https://github.com/librette), [Nette](https://github.com/nette) tests
 
